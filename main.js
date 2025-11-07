@@ -1,79 +1,105 @@
 /**
- * Main Game Loop for Screeps
+ * Main Game Loop for Screeps - Improved Version
  * This is the entry point that runs every game tick
+ * Features: Static harvesting, path caching, dynamic spawning, tower defense
  */
+
+// Import manager modules
+var memoryManager = require('manager.memory');
+var spawnManager = require('manager.spawn');
+var roomManager = require('manager.room');
 
 // Import role modules
 var roleHarvester = require('role.harvester');
+var roleMiner = require('role.miner');
+var roleHauler = require('role.hauler');
 var roleUpgrader = require('role.upgrader');
 var roleBuilder = require('role.builder');
 
 module.exports.loop = function () {
-    
-    // Clean up memory of dead creeps
-    for(var name in Memory.creeps) {
-        if(!Game.creeps[name]) {
-            delete Memory.creeps[name];
-            console.log('Clearing non-existing creep memory:', name);
+
+    // CPU tracking (optional - comment out if not needed)
+    var cpuStart = Game.cpu.getUsed();
+
+    // Memory management - run periodic cleanup
+    memoryManager.runCleanup();
+
+    // Process each room
+    for(var roomName in Game.rooms) {
+        var room = Game.rooms[roomName];
+
+        // Skip rooms we don't own
+        if(!room.controller || !room.controller.my) {
+            continue;
         }
-    }
 
-    // Count creeps by role
-    var harvesters = _.filter(Game.creeps, (creep) => creep.memory.role == 'harvester');
-    var upgraders = _.filter(Game.creeps, (creep) => creep.memory.role == 'upgrader');
-    var builders = _.filter(Game.creeps, (creep) => creep.memory.role == 'builder');
+        // Initialize room memory if needed
+        memoryManager.initRoomMemory(room);
 
-    // Auto-spawn creeps based on needs
-    var spawn = Game.spawns['Spawn1'];
-    
-    // Minimum creep counts
-    var minHarvesters = 2;
-    var minUpgraders = 2;
-    var minBuilders = 2;
+        // Run room management (towers, defense, analysis)
+        roomManager.run(room);
 
-    // Spawn harvesters first (highest priority)
-    if(harvesters.length < minHarvesters) {
-        var newName = 'Harvester' + Game.time;
-        console.log('Spawning new harvester: ' + newName);
-        spawn.spawnCreep([WORK, CARRY, MOVE], newName, 
-            {memory: {role: 'harvester'}});
-    }
-    // Then spawn upgraders
-    else if(upgraders.length < minUpgraders) {
-        var newName = 'Upgrader' + Game.time;
-        console.log('Spawning new upgrader: ' + newName);
-        spawn.spawnCreep([WORK, CARRY, MOVE], newName,
-            {memory: {role: 'upgrader'}});
-    }
-    // Finally spawn builders
-    else if(builders.length < minBuilders) {
-        var newName = 'Builder' + Game.time;
-        console.log('Spawning new builder: ' + newName);
-        spawn.spawnCreep([WORK, CARRY, MOVE], newName,
-            {memory: {role: 'builder'}});
-    }
+        // Run spawn management for each spawn in the room
+        var spawns = room.find(FIND_MY_SPAWNS);
+        for(var spawn of spawns) {
+            spawnManager.run(spawn);
 
-    // Display spawn status
-    if(spawn.spawning) { 
-        var spawningCreep = Game.creeps[spawn.spawning.name];
-        spawn.room.visual.text(
-            '🛠️' + spawningCreep.memory.role,
-            spawn.pos.x + 1, 
-            spawn.pos.y, 
-            {align: 'left', opacity: 0.8});
+            // Display spawn status
+            if(spawn.spawning) {
+                var spawningCreep = Game.creeps[spawn.spawning.name];
+                spawn.room.visual.text(
+                    '🛠️' + spawningCreep.memory.role,
+                    spawn.pos.x + 1,
+                    spawn.pos.y,
+                    {align: 'left', opacity: 0.8});
+            }
+        }
     }
 
     // Run role logic for each creep
     for(var name in Game.creeps) {
         var creep = Game.creeps[name];
-        if(creep.memory.role == 'harvester') {
-            roleHarvester.run(creep);
+
+        // Skip creeps that are spawning
+        if(creep.spawning) {
+            continue;
         }
-        if(creep.memory.role == 'upgrader') {
-            roleUpgrader.run(creep);
+
+        try {
+            switch(creep.memory.role) {
+                case 'harvester':
+                    roleHarvester.run(creep);
+                    break;
+                case 'miner':
+                    roleMiner.run(creep);
+                    break;
+                case 'hauler':
+                    roleHauler.run(creep);
+                    break;
+                case 'upgrader':
+                    roleUpgrader.run(creep);
+                    break;
+                case 'builder':
+                    roleBuilder.run(creep);
+                    break;
+                default:
+                    console.log('Unknown role:', creep.memory.role, 'for creep', name);
+            }
+        } catch(e) {
+            console.log('Error running creep', name, ':', e.message);
+            console.log(e.stack);
         }
-        if(creep.memory.role == 'builder') {
-            roleBuilder.run(creep);
-        }
+    }
+
+    // CPU tracking - log if usage is high
+    var cpuUsed = Game.cpu.getUsed() - cpuStart;
+    if(cpuUsed > Game.cpu.tickLimit * 0.8) {
+        console.log('High CPU usage:', cpuUsed.toFixed(2), '/', Game.cpu.tickLimit);
+    }
+
+    // Log stats every 100 ticks
+    if(Game.time % 100 === 0) {
+        var stats = memoryManager.getMemoryStats();
+        console.log(`[${Game.time}] Memory: ${stats.percentage}, Creeps: ${stats.creepCount}, CPU: ${cpuUsed.toFixed(2)}`);
     }
 }
