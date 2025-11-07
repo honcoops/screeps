@@ -8,6 +8,7 @@
 var memoryManager = require('manager.memory');
 var spawnManager = require('manager.spawn');
 var roomManager = require('manager.room');
+var linkManager = require('manager.links');
 
 // Import role modules
 var roleHarvester = require('role.harvester');
@@ -15,6 +16,7 @@ var roleMiner = require('role.miner');
 var roleHauler = require('role.hauler');
 var roleUpgrader = require('role.upgrader');
 var roleBuilder = require('role.builder');
+var roleMineralMiner = require('role.mineralMiner');
 
 module.exports.loop = function () {
 
@@ -65,6 +67,26 @@ module.exports.loop = function () {
             continue;
         }
 
+        // Creep recycling: Send old creeps back to spawn to be recycled
+        // This prevents energy waste and helps when respawning
+        if (creep.ticksToLive <= 50 && creep.memory.role !== 'miner') {
+            // Miners stay at their position, others return to spawn
+            var spawn = creep.room.find(FIND_MY_SPAWNS)[0];
+            if (spawn) {
+                if (creep.pos.isNearTo(spawn)) {
+                    spawn.recycleCreep(creep);
+                    creep.say('♻️');
+                } else {
+                    creep.moveTo(spawn, {
+                        visualizePathStyle: {stroke: '#ffffff'},
+                        reusePath: 5
+                    });
+                    creep.say('🏠');
+                }
+                continue; // Skip normal role logic when recycling
+            }
+        }
+
         try {
             switch(creep.memory.role) {
                 case 'harvester':
@@ -81,6 +103,9 @@ module.exports.loop = function () {
                     break;
                 case 'builder':
                     roleBuilder.run(creep);
+                    break;
+                case 'mineralMiner':
+                    roleMineralMiner.run(creep);
                     break;
                 default:
                     console.log('Unknown role:', creep.memory.role, 'for creep', name);

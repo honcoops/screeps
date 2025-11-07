@@ -3,6 +3,10 @@
  * Handles room-level operations including tower defense, repair, and room analysis
  */
 
+var linkManager = require('manager.links');
+var terminalManager = require('manager.terminal');
+var labManager = require('manager.labs');
+
 var roomManager = {
 
     /**
@@ -228,6 +232,161 @@ var roomManager = {
     },
 
     /**
+     * Build roads automatically based on creep movement patterns
+     * Creates roads on frequently traveled paths
+     * @param {Room} room
+     */
+    planRoads: function(room) {
+        if (!room.controller || !room.controller.my) {
+            return;
+        }
+
+        // Only plan roads at RCL 3+
+        if (room.controller.level < 3) {
+            return;
+        }
+
+        // Limit road planning to prevent spam
+        if (!room.memory.roadPlanning) {
+            room.memory.roadPlanning = {lastPlanned: 0};
+        }
+
+        // Only plan roads every 1000 ticks
+        if (Game.time - room.memory.roadPlanning.lastPlanned < 1000) {
+            return;
+        }
+
+        room.memory.roadPlanning.lastPlanned = Game.time;
+
+        // Count existing roads and construction sites
+        var existingRoads = room.find(FIND_STRUCTURES, {
+            filter: {structureType: STRUCTURE_ROAD}
+        }).length;
+
+        var roadSites = room.find(FIND_CONSTRUCTION_SITES, {
+            filter: {structureType: STRUCTURE_ROAD}
+        }).length;
+
+        // Don't create too many road sites at once
+        if (roadSites > 5) {
+            return;
+        }
+
+        // Find important locations
+        var spawns = room.find(FIND_MY_SPAWNS);
+        var sources = room.find(FIND_SOURCES);
+        var controller = room.controller;
+        var storage = room.storage;
+        var mineral = room.find(FIND_MINERALS)[0];
+
+        if (spawns.length === 0) {
+            return;
+        }
+
+        var spawn = spawns[0];
+        var pathsToCreate = [];
+
+        // Priority 1: Spawn to sources
+        for (var source of sources) {
+            pathsToCreate.push({from: spawn.pos, to: source.pos});
+        }
+
+        // Priority 2: Spawn to controller
+        pathsToCreate.push({from: spawn.pos, to: controller.pos});
+
+        // Priority 3: Sources to controller
+        for (var source of sources) {
+            pathsToCreate.push({from: source.pos, to: controller.pos});
+        }
+
+        // Priority 4: Spawn/Storage to mineral (if RCL 6+)
+        if (room.controller.level >= 6 && mineral) {
+            pathsToCreate.push({from: spawn.pos, to: mineral.pos});
+            if (storage) {
+                pathsToCreate.push({from: storage.pos, to: mineral.pos});
+            }
+        }
+
+        // Priority 5: Storage connections (if exists)
+        if (storage) {
+            pathsToCreate.push({from: spawn.pos, to: storage.pos});
+            for (var source of sources) {
+                pathsToCreate.push({from: source.pos, to: storage.pos});
+            }
+        }
+
+        // Create roads along paths
+        for (var pathInfo of pathsToCreate) {
+            this.createRoadPath(room, pathInfo.from, pathInfo.to);
+        }
+    },
+
+    /**
+     * Create road construction sites along a path
+     * @param {Room} room
+     * @param {RoomPosition} from
+     * @param {RoomPosition} to
+     */
+    createRoadPath: function(room, from, to) {
+        var path = from.findPathTo(to, {
+            ignoreCreeps: true,
+            swampCost: 1, // Roads make swamps passable
+            plainCost: 1
+        });
+
+        var roadsPlaced = 0;
+
+        for (var i = 0; i < path.length && roadsPlaced < 3; i++) {
+            var pos = room.getPositionAt(path[i].x, path[i].y);
+
+            // Don't place roads on structures (except roads)
+            var structures = pos.lookFor(LOOK_STRUCTURES);
+            var hasNonRoadStructure = structures.some(s => s.structureType !== STRUCTURE_ROAD);
+
+            if (hasNonRoadStructure) {
+                continue;
+            }
+
+            // Check if road or construction site already exists
+            var hasRoad = structures.some(s => s.structureType === STRUCTURE_ROAD);
+            var hasRoadSite = pos.lookFor(LOOK_CONSTRUCTION_SITES).some(
+                s => s.structureType === STRUCTURE_ROAD
+            );
+
+            if (!hasRoad && !hasRoadSite) {
+                var result = room.createConstructionSite(pos, STRUCTURE_ROAD);
+                if (result === OK) {
+                    roadsPlaced++;
+                }
+            }
+        }
+    },
+
+    /**
+     * Run power spawn to process power
+     * @param {Room} room
+     */
+    runPowerSpawn: function(room) {
+        // Only for RCL 8 rooms with power spawn
+        if (!room.controller || room.controller.level < 8) {
+            return;
+        }
+
+        var powerSpawn = room.find(FIND_MY_STRUCTURES, {
+            filter: {structureType: STRUCTURE_POWER_SPAWN}
+        })[0];
+
+        if (!powerSpawn) {
+            return;
+        }
+
+        // Check if power spawn has resources to process
+        if (powerSpawn.store[RESOURCE_ENERGY] >= 50 && powerSpawn.store[RESOURCE_POWER] >= 1) {
+            powerSpawn.processPower();
+        }
+    },
+
+    /**
      * Main room management function
      * @param {Room} room
      */
@@ -235,10 +394,27 @@ var roomManager = {
         // Run towers every tick
         this.runTowers(room);
 
+        // Run link management every tick
+        linkManager.run(room);
+
+        // Run terminal management every tick
+        terminalManager.run(room);
+
+        // Run lab management every tick
+        labManager.run(room);
+
+        // Run power spawn every tick
+        this.runPowerSpawn(room);
+
         // Periodic operations
         if (Game.time % 50 === 0) {
             this.analyzeRoom(room);
             this.placeSourceContainers(room);
+        }
+
+        // Road planning (less frequent)
+        if (Game.time % 100 === 0) {
+            this.planRoads(room);
         }
     }
 };

@@ -1,8 +1,10 @@
 /**
  * Role: Upgrader
  * Purpose: Harvest energy and use it to upgrade the room controller
- * Optimized with path caching and container/storage support
+ * Optimized with path caching and container/storage/link support
  */
+
+var linkManager = require('manager.links');
 
 var roleUpgrader = {
 
@@ -34,11 +36,20 @@ var roleUpgrader = {
     },
 
     /**
-     * Collect energy from containers, storage, or sources
+     * Collect energy from containers, storage, links, or sources
      * @param {Creep} creep
      */
     collectEnergy: function(creep) {
-        // Try to withdraw from containers or storage first
+        // Priority 1: Try controller link first (RCL 5+)
+        var controllerLink = linkManager.getControllerLink(creep.room);
+        if (controllerLink && controllerLink.store[RESOURCE_ENERGY] > 0) {
+            if (creep.withdraw(controllerLink, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
+                this.moveToTarget(creep, controllerLink);
+            }
+            return;
+        }
+
+        // Priority 2: Try to withdraw from containers or storage
         var container = creep.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: (s) => {
                 return (s.structureType === STRUCTURE_CONTAINER ||

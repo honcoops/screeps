@@ -121,6 +121,34 @@ var spawnManager = {
     },
 
     /**
+     * Get optimized mineral miner body based on available energy
+     * @param {number} energy - Available energy
+     * @param {number} rcl - Room Control Level
+     * @returns {array} Body parts array
+     */
+    getMineralMinerBody: function(energy, rcl) {
+        // Mineral miners need WORK parts to mine and CARRY to transport
+        if (energy >= 1200) {
+            // 8 WORK, 4 CARRY, 6 MOVE
+            return [
+                WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK,
+                CARRY, CARRY, CARRY, CARRY,
+                MOVE, MOVE, MOVE, MOVE, MOVE, MOVE
+            ]; // 1200 energy
+        } else if (energy >= 800) {
+            // 6 WORK, 3 CARRY, 4 MOVE
+            return [
+                WORK, WORK, WORK, WORK, WORK, WORK,
+                CARRY, CARRY, CARRY,
+                MOVE, MOVE, MOVE, MOVE
+            ]; // 750 energy
+        } else {
+            // Basic mineral miner
+            return [WORK, WORK, WORK, CARRY, MOVE, MOVE]; // 450 energy
+        }
+    },
+
+    /**
      * Get spawn priority and determine which creep to spawn next
      * @param {Room} room
      * @returns {object|null} {role, body} or null if nothing to spawn
@@ -135,6 +163,7 @@ var spawnManager = {
         var haulers = _.filter(creeps, (c) => c.memory.role === 'hauler');
         var upgraders = _.filter(creeps, (c) => c.memory.role === 'upgrader');
         var builders = _.filter(creeps, (c) => c.memory.role === 'builder');
+        var mineralMiners = _.filter(creeps, (c) => c.memory.role === 'mineralMiner');
 
         var rcl = room.controller.level;
         var energy = room.energyCapacityAvailable;
@@ -200,7 +229,30 @@ var spawnManager = {
             };
         }
 
-        // Priority 5: Extra haulers if energy is backing up
+        // Priority 5: Mineral miner (RCL 6+ only, one per mineral)
+        if (rcl >= 6) {
+            var minerals = room.find(FIND_MINERALS);
+            if (minerals.length > 0 && minerals[0].mineralAmount > 0) {
+                // Check if extractor exists
+                var extractor = minerals[0].pos.lookFor(LOOK_STRUCTURES).find(
+                    s => s.structureType === STRUCTURE_EXTRACTOR
+                );
+
+                if (extractor && mineralMiners.length === 0) {
+                    return {
+                        role: 'mineralMiner',
+                        body: this.getMineralMinerBody(energy, rcl),
+                        memory: {
+                            role: 'mineralMiner',
+                            mineralId: minerals[0].id,
+                            mining: true
+                        }
+                    };
+                }
+            }
+        }
+
+        // Priority 6: Extra haulers if energy is backing up
         // Check if containers are getting full
         if (haulers.length < sourceCount * 2) {
             var containers = room.find(FIND_STRUCTURES, {
