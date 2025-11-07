@@ -2,7 +2,10 @@
  * Role: Miner
  * Purpose: Static harvester that stays at a source and mines continuously
  * Builds and maintains containers for efficient energy collection
+ * At RCL 5+, uses links if available for instant energy transfer
  */
+
+var linkManager = require('manager.links');
 
 var roleMiner = {
 
@@ -60,8 +63,15 @@ var roleMiner = {
             creep.say('⛏️');
         }
 
+        // Check for link near source (RCL 5+)
+        var link = linkManager.getNearbySourceLink(creep.pos);
+        if (link && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+            if (creep.transfer(link, RESOURCE_ENERGY) === OK) {
+                creep.say('🔗');
+            }
+        }
         // If container is full and miner is full, transfer to nearby structures
-        if (container && container.store.getFreeCapacity(RESOURCE_ENERGY) === 0 &&
+        else if (container && container.store.getFreeCapacity(RESOURCE_ENERGY) === 0 &&
             creep.store.getFreeCapacity() === 0) {
 
             // Look for nearby spawns or extensions

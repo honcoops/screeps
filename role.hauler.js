@@ -214,7 +214,7 @@ var roleHauler = {
 
     /**
      * Find the best target to deliver energy to
-     * Priority: Spawn > Extensions > Towers > Storage
+     * Priority: Spawn > Extensions > Towers > Terminal (if needs energy) > Storage
      * @param {Creep} creep
      * @returns {Structure|null}
      */
@@ -252,7 +252,15 @@ var roleHauler = {
             return creep.pos.findClosestByPath(towers);
         }
 
-        // Priority 4: Storage (long-term storage)
+        // Priority 4: Terminal (if it needs energy)
+        if (creep.room.memory.terminalNeedsEnergy) {
+            var terminal = creep.room.terminal;
+            if (terminal && terminal.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+                return terminal;
+            }
+        }
+
+        // Priority 5: Storage (long-term storage)
         var storage = creep.room.storage;
         if (storage && storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
             return storage;
